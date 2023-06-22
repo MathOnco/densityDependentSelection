@@ -138,6 +138,12 @@ for(param in names(inputList)){
     # load CC specific AUCell object:
     load(file=paste0("../data/auCellObjects/uList_",state,".RObj"))
     teList_[[state]]=getStats4ParamFit(param,uList,poi, verbose=F)$te
+    if(state=="G0G1"){
+      cloneMembershipBarplot = as.data.frame(plyr::count(paste(uList$cloneMembership, uList$clMembership)))
+      cloneMembershipBarplot = cloneMembershipBarplot %>% separate(x, c('clone', 'cellLine'), sep = " ")
+      rownames(cloneMembershipBarplot) = cloneMembershipBarplot$clone
+      cloneMembershipBarplot$ratio=sapply(cloneMembershipBarplot$clone, function(x) cloneMembershipBarplot[cloneMembershipBarplot$clone==x, "freq"]/sum(cloneMembershipBarplot[cloneMembershipBarplot$cellLine==cloneMembershipBarplot[cloneMembershipBarplot$clone==x,"cellLine"],"freq"]))
+    }
   }
   teList[[param]]=do.call(rbind,teList_)
   # Choose cell cycle state with best model performance for this param:
@@ -151,16 +157,16 @@ for(param in names(inputList)){
   clonesToCellLinesMap = as.data.frame(plyr::count(paste(uList$cloneMembership, uList$clMembership)))
   clonesToCellLinesMap = clonesToCellLinesMap %>% separate(x, c('clone', 'cellLine'), sep = " ")
   rownames(clonesToCellLinesMap) = clonesToCellLinesMap$clone
-  
-  clonesToCellLinesMap$ratio=sapply(clonesToCellLinesMap$clone, function(x) clonesToCellLinesMap[clonesToCellLinesMap$clone==x, "freq"]/sum(clonesToCellLinesMap[clonesToCellLinesMap$cellLine==clonesToCellLinesMap[clonesToCellLinesMap$clone==x,"cellLine"],"freq"]))
-  
+  # 
+  # clonesToCellLinesMap$ratio=sapply(clonesToCellLinesMap$clone, function(x) clonesToCellLinesMap[clonesToCellLinesMap$clone==x, "freq"]/sum(clonesToCellLinesMap[clonesToCellLinesMap$cellLine==clonesToCellLinesMap[clonesToCellLinesMap$clone==x,"cellLine"],"freq"]))
+  # 
   # model predictions
   scDat=data.frame(indepVar1 = uList$pathways[inputList[[param]],])
   predVar = predict(model, scDat)
   if(param == "K"){
     predVar = exp(predVar)
   }
-
+  
   ## set up data frame to use in ggplot
   scDat$prediction = predVar
   scDat$clone = uList$cloneMembership
@@ -187,9 +193,8 @@ for(param in names(inputList)){
     theme_minimal() + 
     theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1,size = 14),axis.text.y = element_text(size = 12), legend.position = "none", axis.title = element_text(size = 18))
   if(param=="K"){
-    g2 = g2 + coord_trans( y = "log10");
+    g3 = g2 + coord_trans( y = "log10");
   }
-  print(g2)
   
   # produce parameter over biomarker plot
   fitSummaryTable$biomarkerActivity = as.data.frame(grpstats(as.matrix(uList$pathways[inputList[[param]],]), uList$clMembership, "median"))[rownames(fitSummaryTable),]
@@ -202,16 +207,19 @@ for(param in names(inputList)){
     geom_errorbar(aes(ymin=biomarkerActivity-mad, ymax=biomarkerActivity+mad)) +
     xlab(axesTitleList[param]) + ylab(inputList[[param]]) + theme_minimal() + theme(axis.title = element_text(size = 18), axis.text = element_text(size = 14), legend.position = "none")
   if(param=="K"){
-    gg1 = gg1 + scale_x_log10()
+    gg2 = gg1 + scale_x_log10()
   }
-  
-  print(gg1)
   
   # gather pairs of clones with significant difference
   compsList = getLargestSignificantPair(scDat, clonesToCellLinesMap,cellLinePairs,maxPval=0.1,maxOnly = F)
   pairs[[param]]=compsList$subpopComps
   colnames(pairs[[param]])=paste0(param,"_",colnames(pairs[[param]]))
 }
+
+print(gg1)
+print(gg2)
+print(g2)
+print(g3)
 
 ## check out subpop growth params
 cloneCounts = plyr::count(unlist(sapply(subpopGrowthParams, function(x) rownames(x), simplify = F)))
@@ -236,21 +244,21 @@ rI=teList$r[pTable$`r.rownames(x)`[rI],]
 ## p-val adjust
 rK_Validation=rbind(rI,kI)
 rK_Validation$correctedPval=p.adjust(rK_Validation$p.value,method = "fdr")
-print(rK_Validation)
+print(rK_Validation[,c(1,3:4)])
 ```
 
 ## Generate Figure 1E
 ```{r}
 ## produce stacked bar plots for clonal membership
 ## number of clones may change depending on which cell cycle state you are looking at 
-new.dd.col=c("#FFF5EB", "#FEE6CE", "#FDD0A2", "#FDAE6B" ,"#FD8D3C", "#F16913", "#D94801", "#4292C6", "#08519C", "#08306B","#FC9272", "#FB6A4A", "#EF3B2C", "#A50F15","#CB181D", "#67000D", "#D7301F", "#B30000","#C7E9C0", "#A1D99B","#41AB5D", "#238B45", "#006D2C", "#FFFFCC", "#FFEDA0","#FCC5C0", "#FA9FB5", "#F768A1","#DEEBF7","#F7FBFF", "#C6DBEF" ,"#9ECAE1") # extra colors for other cell cycles "#FFF5F0", "#FEE0D2", "#FCBBA1","#00441B","#FED976", "#2171B5","#A63603")
-names(new.dd.col) = clonesToCellLinesMap$clone
-ggplot(data=clonesToCellLinesMap, aes(x=" ", y=ratio, group=cellLine, color=cellLine, fill=clone)) +
+new.dd.col=c("#FFF5EB","#F16913", "#FEE6CE", "#FDD0A2", "#FDAE6B" ,"#FD8D3C", "#D94801", "#A63603","#4292C6","#2171B5","#08519C", "#08306B", "#FB6A4A", "#EF3B2C", "#A50F15","#CB181D", "#67000D", "#D7301F", "#B30000","#FFF5F0", "#FEE0D2","#FCBBA1", "#FC9272","#C7E9C0", "#A1D99B","#41AB5D", "#238B45", "#006D2C", "#00441B", "#FFFFCC", "#FED976","#FFEDA0","#F768A1","#FCC5C0", "#FA9FB5","#DEEBF7","#F7FBFF", "#C6DBEF" ,"#9ECAE1") 
+names(new.dd.col) = cloneMembershipBarplot$clone
+ggplot(data=cloneMembershipBarplot, aes(x=" ", y=ratio, group=cellLine, color=cellLine, fill=clone)) +
   scale_fill_manual("Legend", values = new.dd.col) +
-  scale_color_manual("Legend", values = dd.col[unique(clonesToCellLinesMap$cellLine)]) +
+  scale_color_manual("Legend", values = dd.col[unique(cloneMembershipBarplot$cellLine)]) +
   geom_bar(width = 1, stat = "identity") +
   coord_polar("y", start=0) + 
-  facet_grid(.~ cellLine) + theme_void() 
+  facet_grid(.~ cellLine) + theme_void() + theme(legend.position="none")
 ```
 
 ## Generate Figure 2A
@@ -261,7 +269,7 @@ rK_pairs=rK_pairs[!is.na(rK_pairs$r_src) & !is.na(rK_pairs$K_src),]
 estimate=as.numeric(rbind(rK_pairs$r_estimate, rK_pairs$K_estimate))
 pval=as.numeric(rbind(rK_pairs$r_pval, rK_pairs$K_pval))
 ## Plot them
-col=sort(rep(dd.col[rK_pairs$r_src],2))
+col=sort(rep(dd.col[rK_pairs$r_src],2), decreasing = TRUE)
 ymax=max(estimate)*1.2
 barplot(estimate, col=col, names=rep(c("r","K"),nrow(rK_pairs)), ylab = "clone 1 / clone 2", ylim=c(0,ymax))
 points(c(-1,100),c(1,1),type = "l")
