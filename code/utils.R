@@ -144,12 +144,14 @@ getLargestSignificantPair<-function(scDat, clonesToCellLinesMap, cellLinePairs, 
   for(CL in unique(clonesToCellLinesMap$cellLine)){
     clonePairs = t(combn(unique(clonesToCellLinesMap[clonesToCellLinesMap$cellLine==CL, "clone"]), 2))
     for(i in 1:nrow(clonePairs)){
-      pval_=try(t.test(scDat[scDat$clone==clonePairs[i,1], "prediction"], scDat[scDat$clone==clonePairs[i,2], "prediction"]))
-      if(class(pval_)=="try-error"){
-        pval=as.data.frame(matrix(data=1))
-        colnames(pval)="pval"
-      }else{
-        pval=as.data.frame(list(estimate=pval_$estimate[1]/pval_$estimate[2],pval=pval_$p.value))
+      if(numel(scDat[scDat$clone==clonePairs[i,1], "prediction"])>1 && numel(scDat[scDat$clone==clonePairs[i,2], "prediction"])>1){
+        pval_=try(t.test(scDat[scDat$clone==clonePairs[i,1], "prediction"], scDat[scDat$clone==clonePairs[i,2], "prediction"]))
+        if(class(pval_)=="try-error"){
+          pval=as.data.frame(matrix(data=1))
+          colnames(pval)="pval"
+        }else{
+          pval=as.data.frame(list(estimate=pval_$estimate[1]/pval_$estimate[2],pval=pval_$p.value))
+        }
       }
       pval$clones = list(c(clonePairs[i,1],clonePairs[i,2]))
       rownames(pval) = list(c(clonePairs[i,1],clonePairs[i,2]))
@@ -168,7 +170,6 @@ getLargestSignificantPair<-function(scDat, clonesToCellLinesMap, cellLinePairs, 
 
 # Define function to calculate Rsquared and other stats for model fits for a given growth parameter
 getStats4ParamFit<-function(param,uList,poi,verbose=F){
-  suppressMessages({
   ppCL=grpstats(t(uList$pathways), uList$clMembership, "median")$median[cellLines,]
   depVar = as.numeric(fitSummaryTable[rownames(ppCL),param])
   if(param == "K"){
@@ -182,7 +183,7 @@ getStats4ParamFit<-function(param,uList,poi,verbose=F){
   names(pvals)=gsub("\\.value*", "", names(pvals))
   model = te[[which.min(pvals)]]
   # get pearson's correlation for each pathway
-  pearson=invisible(sapply(names(te), function(x) cor.test(ppCL[,x], as.numeric(fitSummaryTable[rownames(ppCL),param]))$estimate))
+  pearson=sapply(names(te), function(x) cor.test(ppCL[,x], as.numeric(fitSummaryTable[rownames(ppCL),param]))$estimate)
   names(pearson)=gsub("\\.cor*", "", names(pvals))
   # gather it all together
   te = as.data.frame(sapply(te, function(x) summary(x)$adj.r.squared))
@@ -194,6 +195,5 @@ getStats4ParamFit<-function(param,uList,poi,verbose=F){
     print(param)
     print(head(te[1:5,]))
   }
-  })
   return(list(te=te, model=model))
 }
