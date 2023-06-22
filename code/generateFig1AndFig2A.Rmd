@@ -1,0 +1,271 @@
+---
+title: "Generate Figure 1 and Figure 2A"
+output: html_document
+date: "2023-06-22"
+---
+```{r, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE, message = FALSE, warning = FALSE)
+```
+
+## Setup
+Let's start by loading in our libraries, setting our working directory, and sourcing some functions
+```{r}
+library(ggplot2)
+library(ggsignif)
+library(graphics)
+library(matlab)
+library(DBI)
+library(xtable)
+library(egg)
+library(AUCell)
+library(xlsx)
+library(growthrates)
+library(purrr)
+library(ggbreak)
+library(dplyr)
+library(tidyr)
+setwd('~/Repositories/densityDependentSelection/code') 
+source('getGrowthModel.R')
+source('utils.R')
+```
+
+## Get Cell Line r/K Parameters
+This section does not produce any figures, but it produces the list 'fits' which will be used further down.
+```{r}
+lineages = sort(c("NUGC-4_A4_seed","NCI-N87_A59_seed","HGC-27_A22_seed","KATOIII_A6_seed","SNU-668_A9_seed" ,"MKN-45_A4_seed","SNU-638_A4_seed","SNU-601_A4_seed"));
+cellLines = gsub("\\_.*","",lineages)
+cellLinePairs = t(combn(unique(cellLines), 2))
+modelTypes = list(Logistic = grow_logistic)
+rSquares = matrix(NA, length(modelTypes), length(lineages), dimnames = list(names(modelTypes), lineages))
+fits = list()
+for (lineage in lineages) {
+  tmp =try(getGrowthModel(lineage,modelTypes[["Logistic"]]))
+  tmp$type = "Logistic"
+  fits[[lineage]] = tmp
+  targetDate = sort(as.POSIXct(tmp$out$date), decreasing=F)[round(nrow(tmp$out)*0.25)]
+  rSquares["Logistic", lineage] = tmp$adjr2
+}
+fitSummaryTable = data.frame(matrix(NA, nrow = length(lineages), ncol = 3, dimnames = list(lineages, c("r", "K", "adjutedRSquared"))))
+fitSummaryTable$adjutedRSquared=sapply(lineages, function(x) round(max(rSquares[,x]), 4))
+fitSummaryTable$r=sapply(lineages, function(x) round(fits[[x]]$modelsum@par["mumax"],2))
+fitSummaryTable$K=sapply(lineages, function(x) round(fits[[x]]$modelsum@par["K"]))
+fitSummaryTable$cellLine = gsub("\\_.*", "", rownames(fitSummaryTable))
+rownames(fitSummaryTable) = fitSummaryTable$cellLine
+fitSummaryTable[,1:3]
+```
+
+## Produce Figure 1A
+```{r}
+# Find x-axis range need to accommodate all fits
+maxDay = max(unlist(sapply(fits, function(x) x$modelsum@obs$time)))
+x = seq(0, maxDay, by = 0.01)
+# Extract our y-values from fits
+ggplotGrowthCurves = lapply(fits, function(v) y = (v$modelsum@par["K"] * v$modelsum@par["y0"])/(v$modelsum@par["y0"] + (v$modelsum@par["K"] - v$modelsum@par["y0"]) * exp(-v$modelsum@par["mumax"] * x)))
+
+# Shift plots along the x-axis so that they cross x=0 at their max growth rate
+medians = sapply(ggplotGrowthCurves, function(x) median(0:max(na.omit(x))))
+diffVals = sapply(names(fits), function(x) abs(ggplotGrowthCurves[[x]] - medians[[x]]))
+daysToSubtract = apply(diffVals, 2, function(v) x[which.min(v)])
+
+# Setup colors so that it is consistent across all plots
+dd.col = RColorBrewer::brewer.pal(length(cellLines),"Paired");
+names(dd.col) = cellLines
+
+# Grab (x,y) coords for all cell line growth data and store in 'ggplotGrowthDataPoints'
+ggplotGrowthDataPoints = list()
+for (name in names(fits)){
+  ggplotGrowthDataPoints[[name]] = fits[[name]]$modelsum@obs$time-daysToSubtract[[name]]
+}
+ggplotGrowthDataPoints = round(as.data.frame(unlist(ggplotGrowthDataPoints)),2)
+names(ggplotGrowthDataPoints) = "xPoints"
+ggplotGrowthDataPoints$yPoints = unlist(lapply(names(fits), function(x) fits[[x]]$modelsum@obs$y))
+ggplotGrowthDataPoints$CL = gsub("\\_.*","",rownames(ggplotGrowthDataPoints))
+
+# Rename daysToSubtract to match cell lines and populate ggplotGrowthCurves with shifted x-values (ggplotGrowthCurves$newDays)
+names(daysToSubtract) = gsub("\\_.*","",names(daysToSubtract))
+ggplotGrowthCurves = as.data.frame(unlist(ggplotGrowthCurves))
+names(ggplotGrowthCurves) = "y"
+ggplotGrowthCurves$CL = gsub("\\_.*","",rownames(ggplotGrowthCurves))
+ggplotGrowthCurves$x = repmat(x,1)
+ggplotGrowthCurves$newDays=unlist(lapply(unique(ggplotGrowthCurves$CL), function(z) ggplotGrowthCurves[ggplotGrowthCurves$CL==z, "x"]-daysToSubtract[z]))
+
+# here we adjust the ggplotGrowthCurves so that each curve will end at the last data point for that cell line
+# above when we find the ggplotGrowthCurves they are all solved over same timespan - this loop gives them all unique x-axes
+# it makes them look nicer, this is an aesthetic change only
+adjuster = list()
+for(CL in cellLines){
+  cutOff = max(ggplotGrowthDataPoints[ggplotGrowthDataPoints$CL==CL, "xPoints"])
+  tmp = ggplotGrowthCurves[ggplotGrowthCurves$newDays<=cutOff, ]
+  tmp = tmp[tmp$CL==CL,]
+  adjuster[[CL]] = tmp
+}
+
+ggplotGrowthCurves = adjuster %>% map_df(~rbind(.x), .id = 'CL')
+
+# Create data frame to pass through to ggplot that contains ggplotGrowthCurves and points
+dfT = list(df1 = ggplotGrowthCurves, df2 = ggplotGrowthDataPoints) %>% 
+  map_df(~rbind(.x), .id = 'df')
+
+ggplot(data=dfT, aes(x=newDays, y=y, color=CL)) + 
+  geom_line(linewidth=2) + geom_point(aes(x=xPoints, y=yPoints), size=4) + scale_color_manual(values=dd.col) + 
+  scale_y_log10() + xlab("Time (days)") + ylab("Cell count") + theme_minimal() + 
+  theme(axis.text = element_text(size = 14), axis.title = element_text(size = 18), legend.position="none")
+```
+
+## Generate Figures 1C-D,1F-G
+```{r}
+# If no AUCell objects in directory, run AUCell on Seurat objects
+if(length(list.files("../data/auCellObjects"))<4){
+  for(state in c("S","G0G1","G2M","all")){
+    uList = getTranscriptomeData(cellLines, ccstate = state)
+    save(file=paste0("../data/auCellObjects/uList_",state,".RObj"), "uList")
+  }
+}
+
+# Set up list containing a pathway per r/K parameter
+inputList = list("K"= "Arginine and proline metabolism", "r" = "Amoebiasis")
+axesTitleList = list("K"= "Carrying capacity (K)", "r" = "Growth rate (r)")
+
+# Compare pathways from hela paper to growth parameters:
+poi=read.xlsx("../data/pathways/TableS2andS3_HelaPaper.xlsx",sheetName =  "LowDensity")
+subpopGrowthParams = list()
+pairs = teList = cellCycleClones = list()
+maxPval=0.1
+mapSigLevel = c("***"=0.001, "**"=0.01, "*"=0.05, "o"=0.1)
+for(param in names(inputList)){
+  teList_ = list()
+  for(state in c("S","G0G1","G2M", "all")){
+    # load CC specific AUCell object:
+    load(file=paste0("../data/auCellObjects/uList_",state,".RObj"))
+    teList_[[state]]=getStats4ParamFit(param,uList,poi, verbose=F)$te
+  }
+  teList[[param]]=do.call(rbind,teList_)
+  # Choose cell cycle state with best model performance for this param:
+  teList_=sapply(teList_, function(x) x[1,])
+  state=colnames(teList_)[which.max(teList_[1,])]
+  load(file=paste0("../data/auCellObjects/uList_",state,".RObj"))
+  out =getStats4ParamFit(param,uList,poi)
+  model = out$model
+  
+  # Build mapping of clones to cell lines
+  clonesToCellLinesMap = as.data.frame(plyr::count(paste(uList$cloneMembership, uList$clMembership)))
+  clonesToCellLinesMap = clonesToCellLinesMap %>% separate(x, c('clone', 'cellLine'), sep = " ")
+  rownames(clonesToCellLinesMap) = clonesToCellLinesMap$clone
+  
+  clonesToCellLinesMap$ratio=sapply(clonesToCellLinesMap$clone, function(x) clonesToCellLinesMap[clonesToCellLinesMap$clone==x, "freq"]/sum(clonesToCellLinesMap[clonesToCellLinesMap$cellLine==clonesToCellLinesMap[clonesToCellLinesMap$clone==x,"cellLine"],"freq"]))
+  
+  # model predictions
+  scDat=data.frame(indepVar1 = uList$pathways[inputList[[param]],])
+  predVar = predict(model, scDat)
+  if(param == "K"){
+    predVar = exp(predVar)
+  }
+
+  ## set up data frame to use in ggplot
+  scDat$prediction = predVar
+  scDat$clone = uList$cloneMembership
+  subpopGrowthParams[[param]] = as.data.frame(grpstats(as.matrix(scDat$prediction), as.matrix(scDat$clone), "median"))
+  scDat$cellLine = uList$clMembership
+  
+  # get plot order for clones
+  scDat = getPathwayActivityRanksAcrossCellLines(scDat)
+  compsList = getLargestSignificantPair(scDat, clonesToCellLinesMap,cellLinePairs,maxOnly = T, maxPval = maxPval)
+  list2env(compsList, .GlobalEnv)
+  remove(compsList)
+  
+  # set step increase for plotting
+  sI = 0.08
+  if(param=="K"){
+    sI = 1.4
+  }
+  
+  g2 = ggplot(scDat, aes(x = reorder(clone, PL_rank), y = prediction,fill = cellLine)) + 
+    scale_fill_manual("Legend", values = dd.col) + 
+    geom_violin() + 
+    geom_signif(data=scDat,comparisons = subpopComps$clones, map_signif_level = mapSigLevel,step_increase=sI, test = "t.test",margin_top = 0.9) +    stat_summary(fun = median,geom = "point",size = 2,color = "black") +
+    ylab(axesTitleList[param]) + xlab(NULL) + 
+    theme_minimal() + 
+    theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1,size = 14),axis.text.y = element_text(size = 12), legend.position = "none", axis.title = element_text(size = 18))
+  if(param=="K"){
+    g2 = g2 + coord_trans( y = "log10");
+  }
+  print(g2)
+  
+  # produce parameter over biomarker plot
+  fitSummaryTable$biomarkerActivity = as.data.frame(grpstats(as.matrix(uList$pathways[inputList[[param]],]), uList$clMembership, "median"))[rownames(fitSummaryTable),]
+  fitSummaryTable$parameterValue = fitSummaryTable[,param]
+  fitSummaryTable$mad = sapply(fitSummaryTable$cellLine, function(x) mad(scDat[scDat$cellLine==x, "indepVar1"]))
+  gg1 = ggplot(fitSummaryTable, aes(x=parameterValue, y=biomarkerActivity, group = cellLine, color = cellLine)) + 
+    scale_color_manual("Legend", values = dd.col) + 
+    geom_line() + 
+    geom_point(size=9, shape=c(16,16,10,16,16,10,10,16)) + 
+    geom_errorbar(aes(ymin=biomarkerActivity-mad, ymax=biomarkerActivity+mad)) +
+    xlab(axesTitleList[param]) + ylab(inputList[[param]]) + theme_minimal() + theme(axis.title = element_text(size = 18), axis.text = element_text(size = 14), legend.position = "none")
+  if(param=="K"){
+    gg1 = gg1 + scale_x_log10()
+  }
+  
+  print(gg1)
+  
+  # gather pairs of clones with significant difference
+  compsList = getLargestSignificantPair(scDat, clonesToCellLinesMap,cellLinePairs,maxPval=0.1,maxOnly = F)
+  pairs[[param]]=compsList$subpopComps
+  colnames(pairs[[param]])=paste0(param,"_",colnames(pairs[[param]]))
+}
+
+## check out subpop growth params
+cloneCounts = plyr::count(unlist(sapply(subpopGrowthParams, function(x) rownames(x), simplify = F)))
+clones= cloneCounts$x
+subpopGrowthParams = base::cbind(subpopGrowthParams$K[clones,,drop=F], subpopGrowthParams$r[clones,,drop=F]) #, subpopGrowthParams$v[clones,,drop=F])
+colnames(subpopGrowthParams) = c("K", "r")
+subpopGrowthParams$CL = clonesToCellLinesMap[rownames(subpopGrowthParams), "cellLine"]
+print(subpopGrowthParams)
+```
+
+## Generate Figure 1B
+```{r}
+## Validation set: fewer pathways but tested for all cell lines:
+sT=sapply(teList, function(x) cbind(rownames(x),x), simplify = F)
+pTable=do.call(cbind,sT)
+## Indices for top K pathways
+kI=order(pTable$K.p.value)[1:5];
+kI=teList$K[pTable$`K.rownames(x)`[kI],]
+## Indices for top r pathways
+rI=order(pTable$r.p.value)[1:5]; 
+rI=teList$r[pTable$`r.rownames(x)`[rI],]
+## p-val adjust
+rK_Validation=rbind(rI,kI)
+rK_Validation$correctedPval=p.adjust(rK_Validation$p.value,method = "fdr")
+print(rK_Validation)
+```
+
+## Generate Figure 1E
+```{r}
+## produce stacked bar plots for clonal membership
+## number of clones may change depending on which cell cycle state you are looking at 
+new.dd.col=c("#FFF5EB", "#FEE6CE", "#FDD0A2", "#FDAE6B" ,"#FD8D3C", "#F16913", "#D94801", "#4292C6", "#08519C", "#08306B","#FC9272", "#FB6A4A", "#EF3B2C", "#A50F15","#CB181D", "#67000D", "#D7301F", "#B30000","#C7E9C0", "#A1D99B","#41AB5D", "#238B45", "#006D2C", "#FFFFCC", "#FFEDA0","#FCC5C0", "#FA9FB5", "#F768A1","#DEEBF7","#F7FBFF", "#C6DBEF" ,"#9ECAE1") # extra colors for other cell cycles "#FFF5F0", "#FEE0D2", "#FCBBA1","#00441B","#FED976", "#2171B5","#A63603")
+names(new.dd.col) = clonesToCellLinesMap$clone
+ggplot(data=clonesToCellLinesMap, aes(x=" ", y=ratio, group=cellLine, color=cellLine, fill=clone)) +
+  scale_fill_manual("Legend", values = new.dd.col) +
+  scale_color_manual("Legend", values = dd.col[unique(clonesToCellLinesMap$cellLine)]) +
+  geom_bar(width = 1, stat = "identity") +
+  coord_polar("y", start=0) + 
+  facet_grid(.~ cellLine) + theme_void() 
+```
+
+## Generate Figure 2A
+```{r}
+## Find clone pairs with potential r/K trade-offs:
+rK_pairs=cbind(pairs$r,pairs$K[rownames(pairs$r),])
+rK_pairs=rK_pairs[!is.na(rK_pairs$r_src) & !is.na(rK_pairs$K_src),]
+estimate=as.numeric(rbind(rK_pairs$r_estimate, rK_pairs$K_estimate))
+pval=as.numeric(rbind(rK_pairs$r_pval, rK_pairs$K_pval))
+## Plot them
+col=sort(rep(dd.col[rK_pairs$r_src],2))
+ymax=max(estimate)*1.2
+barplot(estimate, col=col, names=rep(c("r","K"),nrow(rK_pairs)), ylab = "clone 1 / clone 2", ylim=c(0,ymax))
+points(c(-1,100),c(1,1),type = "l")
+leg=paste0(rK_pairs$r_src,": ", sapply(rK_pairs$r_clones, paste, collapse=","))
+legend("topright", leg, fill=unique(col),title = "clone pairs",inset = c(0.05,0.1))
+text(seq(0.75,length(pval)*1.15,1.15),rep(ymax*0.96,4),round(pval,4))
+```
