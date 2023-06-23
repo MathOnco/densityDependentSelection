@@ -4,7 +4,7 @@ output: html_document
 date: "2023-06-22"
 ---
 ```{r, include=FALSE}
-knitr::opts_chunk$set(echo = FALSE, message = FALSE, warning = FALSE)
+knitr::opts_chunk$set(message = FALSE, warning = FALSE)
 ```
 ## Setup
 Let's start by loading in our libraries, setting our working directory, and sourcing some functions
@@ -179,20 +179,20 @@ for(param in names(inputList)){
   
   # set step increase for plotting
   sI = 0.08
+  mT = 0.005
   if(param=="K"){
     sI = 1.4
+    mT = 0.90
   }
   
   g2 = ggplot(scDat, aes(x = reorder(clone, PL_rank), y = prediction,fill = cellLine)) + 
     scale_fill_manual("Legend", values = dd.col) + 
     geom_violin() + 
-    geom_signif(data=scDat,comparisons = subpopComps$clones, map_signif_level = mapSigLevel,step_increase=sI, test = "t.test",margin_top = 0.9) +    stat_summary(fun = median,geom = "point",size = 2,color = "black") +
+    geom_signif(data=scDat,comparisons = subpopComps$clones, map_signif_level = mapSigLevel,step_increase=sI, test = "t.test",margin_top = mT) +    stat_summary(fun = median,geom = "point",size = 2,color = "black") +
     ylab(axesTitleList[param]) + xlab(NULL) + 
     theme_minimal() + 
     theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1,size = 14),axis.text.y = element_text(size = 12), legend.position = "none", axis.title = element_text(size = 18))
-  # if(param=="r"){
-  #   g2 = g2 + ylim(0,1.5)
-  # }
+ 
   if(param=="K"){
     g3 = g2 + coord_trans( y = "log10");
   }
