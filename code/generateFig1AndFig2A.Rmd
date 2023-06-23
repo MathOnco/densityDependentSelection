@@ -6,7 +6,6 @@ date: "2023-06-22"
 ```{r, include=FALSE}
 knitr::opts_chunk$set(echo = FALSE, message = FALSE, warning = FALSE)
 ```
-
 ## Setup
 Let's start by loading in our libraries, setting our working directory, and sourcing some functions
 ```{r}
@@ -30,7 +29,7 @@ source('utils.R')
 ```
 
 ## Get Cell Line r/K Parameters
-This section does not produce any figures, but it produces the list 'fits' which will be used further down.
+This section does not produce any figures, but it produces the list 'fits' which will be used further down. The required input to this section is a list of cell line lineages with matching growth data .txt files in data/cellCounts. The functional script getGrowthModel.R uses the R package 'growthrates' to perform nonlinear regression and return the inferred r/K parameters and summary statistics which are gathered into the 'fitSummaryTable' data frame.
 ```{r}
 lineages = sort(c("NUGC-4_A4_seed","NCI-N87_A59_seed","HGC-27_A22_seed","KATOIII_A6_seed","SNU-668_A9_seed" ,"MKN-45_A4_seed","SNU-638_A4_seed","SNU-601_A4_seed"));
 cellLines = gsub("\\_.*","",lineages)
@@ -54,7 +53,8 @@ rownames(fitSummaryTable) = fitSummaryTable$cellLine
 fitSummaryTable[,1:3]
 ```
 
-## Produce Figure 1A
+## Generate Figure 1A
+Next, we gather up all the individual fits per cell line into one data frame and plot together. We also shift their curves along the x-axis such that the inflection point occurs at x=0 and plot in log-scale.
 ```{r}
 # Find x-axis range need to accommodate all fits
 maxDay = max(unlist(sapply(fits, function(x) x$modelsum@obs$time)))
@@ -91,7 +91,6 @@ ggplotGrowthCurves$newDays=unlist(lapply(unique(ggplotGrowthCurves$CL), function
 
 # here we adjust the ggplotGrowthCurves so that each curve will end at the last data point for that cell line
 # above when we find the ggplotGrowthCurves they are all solved over same timespan - this loop gives them all unique x-axes
-# it makes them look nicer, this is an aesthetic change only
 adjuster = list()
 for(CL in cellLines){
   cutOff = max(ggplotGrowthDataPoints[ggplotGrowthDataPoints$CL==CL, "xPoints"])
@@ -102,7 +101,7 @@ for(CL in cellLines){
 
 ggplotGrowthCurves = adjuster %>% map_df(~rbind(.x), .id = 'CL')
 
-# Create data frame to pass through to ggplot that contains ggplotGrowthCurves and points
+# Create data frame to pass through to ggplot that contains ggplotGrowthCurves and ggplotGrowthDataPoints
 dfT = list(df1 = ggplotGrowthCurves, df2 = ggplotGrowthDataPoints) %>% 
   map_df(~rbind(.x), .id = 'df')
 
@@ -113,6 +112,7 @@ ggplot(data=dfT, aes(x=newDays, y=y, color=CL)) +
 ```
 
 ## Generate Figures 1C-D,1F-G
+Here we go through KEGG pathways identified as differentially expressed between r-selected and K-selected HeLa cells and see which are the best biomarkers for these parameters in our cell lines. This section requires combined Seurat objects (i.e., all cell lines in one Seurat object) per cell cycle state in data/SeuratObjects and will create AUCell objects to be stored in data/auCellObjects if they are not alreay present in that directory. We also print the predicted r/K params for each subpopulation per cell line in this section.
 ```{r}
 # If no AUCell objects in directory, run AUCell on Seurat objects
 if(length(list.files("../data/auCellObjects"))<4){
@@ -157,9 +157,7 @@ for(param in names(inputList)){
   clonesToCellLinesMap = as.data.frame(plyr::count(paste(uList$cloneMembership, uList$clMembership)))
   clonesToCellLinesMap = clonesToCellLinesMap %>% separate(x, c('clone', 'cellLine'), sep = " ")
   rownames(clonesToCellLinesMap) = clonesToCellLinesMap$clone
-  # 
-  # clonesToCellLinesMap$ratio=sapply(clonesToCellLinesMap$clone, function(x) clonesToCellLinesMap[clonesToCellLinesMap$clone==x, "freq"]/sum(clonesToCellLinesMap[clonesToCellLinesMap$cellLine==clonesToCellLinesMap[clonesToCellLinesMap$clone==x,"cellLine"],"freq"]))
-  # 
+  
   # model predictions
   scDat=data.frame(indepVar1 = uList$pathways[inputList[[param]],])
   predVar = predict(model, scDat)
@@ -192,6 +190,9 @@ for(param in names(inputList)){
     ylab(axesTitleList[param]) + xlab(NULL) + 
     theme_minimal() + 
     theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1,size = 14),axis.text.y = element_text(size = 12), legend.position = "none", axis.title = element_text(size = 18))
+  # if(param=="r"){
+  #   g2 = g2 + ylim(0,1.5)
+  # }
   if(param=="K"){
     g3 = g2 + coord_trans( y = "log10");
   }
@@ -224,13 +225,14 @@ print(g3)
 ## check out subpop growth params
 cloneCounts = plyr::count(unlist(sapply(subpopGrowthParams, function(x) rownames(x), simplify = F)))
 clones= cloneCounts$x
-subpopGrowthParams = base::cbind(subpopGrowthParams$K[clones,,drop=F], subpopGrowthParams$r[clones,,drop=F]) #, subpopGrowthParams$v[clones,,drop=F])
+subpopGrowthParams = base::cbind(subpopGrowthParams$K[clones,,drop=F], subpopGrowthParams$r[clones,,drop=F])
 colnames(subpopGrowthParams) = c("K", "r")
 subpopGrowthParams$CL = clonesToCellLinesMap[rownames(subpopGrowthParams), "cellLine"]
 print(subpopGrowthParams)
 ```
 
 ## Generate Figure 1B
+Print the top KEGG pathway biomarker for r/K params across cell lines identified in previous section.
 ```{r}
 ## Validation set: fewer pathways but tested for all cell lines:
 sT=sapply(teList, function(x) cbind(rownames(x),x), simplify = F)
@@ -248,6 +250,7 @@ print(rK_Validation[,c(1,3:4)])
 ```
 
 ## Generate Figure 1E
+The required input to this section ('cloneMembershipBarplot') is gathered in the same section that generates Figures 1C-D, and is hard-coded to display cells in G0/G1 phase which passed QC. This can be changed to display other cell cycle states or all cells.
 ```{r}
 ## produce stacked bar plots for clonal membership
 ## number of clones may change depending on which cell cycle state you are looking at 
@@ -262,6 +265,7 @@ ggplot(data=cloneMembershipBarplot, aes(x=" ", y=ratio, group=cellLine, color=ce
 ```
 
 ## Generate Figure 2A
+The required input to this section ('pairs') is gathered in the same section that generates Figures 1C-D. It contains the pairs of clones within a cell line that contain significantly different r/K parameters (P<0.1). 
 ```{r}
 ## Find clone pairs with potential r/K trade-offs:
 rK_pairs=cbind(pairs$r,pairs$K[rownames(pairs$r),])
