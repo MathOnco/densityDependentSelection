@@ -112,15 +112,8 @@ ggplot(data=dfT, aes(x=newDays, y=y, color=CL)) +
 ```
 
 ## Generate Figures 1C-D,1F-G
-Here we go through KEGG pathways identified as differentially expressed between r-selected and K-selected HeLa cells and see which are the best biomarkers for these parameters in our cell lines. This section requires combined Seurat objects (i.e., all cell lines in one Seurat object) per cell cycle state in data/SeuratObjects and will create AUCell objects to be stored in data/auCellObjects if they are not alreay present in that directory. We also print the predicted r/K params for each subpopulation per cell line in this section.
+Here we go through KEGG pathways identified as differentially expressed between r-selected and K-selected HeLa cells and see which are the best biomarkers for these parameters in our cell lines. This section requires a combined AUCell object (ie, one object for all cell line scRNA-seq data analyzed together) per cell cycle state (G0/G1, S, G2M, all) input to be stored in data/auCellObjects. We also print the predicted r/K params for each subpopulation per cell line in this section.
 ```{r}
-# If no AUCell objects in directory, run AUCell on Seurat objects
-if(length(list.files("../data/auCellObjects"))<4){
-  for(state in c("S","G0G1","G2M","all")){
-    uList = getTranscriptomeData(cellLines, ccstate = state)
-    save(file=paste0("../data/auCellObjects/uList_",state,".RObj"), "uList")
-  }
-}
 
 # Set up list containing a pathway per r/K parameter
 inputList = list("K"= "Arginine and proline metabolism", "r" = "Amoebiasis")
